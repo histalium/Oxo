@@ -1,4 +1,7 @@
+using System.Security.Claims;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.OpenApi.Models;
 using Oxo.Api;
 
@@ -18,7 +21,8 @@ builder.Services.AddSwaggerGen(options =>
             {
                 Scopes = new Dictionary<string, string>
                 {
-                    { "openid", "Open Id" }
+                    { "openid", "Open Id" },
+                    { "profile", "name, nickname, and picture" }
                 },
                 AuthorizationUrl = new Uri(builder.Configuration["Authentication:Domain"] + "authorize?audience=" + builder.Configuration["Authentication:Audience"])
             }
@@ -39,6 +43,14 @@ builder.Services.AddAuthentication(options =>
 });
 
 builder.Services.AddAuthorization();
+builder.Services.AddHttpClient();
+
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<IUserDataAccess, UserDataAccess>();
+builder.Services.AddScoped<GetUserForSubject>();
+builder.Services.AddScoped<AddUserWithSubjectSubject>();
+builder.Services.AddScoped<IOuth0UserProfileApi, Outh0UserProfileApi>();
+builder.Services.AddScoped<UserContext>();
 
 var app = builder.Build();
 
@@ -61,24 +73,53 @@ var summaries = new[]
 app.UseAuthentication();
 app.UseAuthorization();
 
-app.MapGet("/weatherforecast", () =>
+app.Use(UseUser);
+
+static async Task UseUser(HttpContext httpContext, Func<Task> next)
 {
-    var forecast = Enumerable.Range(1, 5).Select(index =>
-       new WeatherForecast
-       (
-           DateTime.Now.AddDays(index),
-           Random.Shared.Next(-20, 55),
-           summaries[Random.Shared.Next(summaries.Length)]
-       ))
-        .ToArray();
-    return forecast;
+    var subject = httpContext.User.Claims
+        .Where(t => t.Type == ClaimTypes.NameIdentifier)
+        .FirstOrDefault()?.Value;
+
+    if (string.IsNullOrEmpty(subject))
+    {
+        await next();
+        return;
+    }
+
+    var getUserForSubject = httpContext.RequestServices.GetRequiredService<GetUserForSubject>();
+    var user = await getUserForSubject.GetUserAsync(subject);
+
+    if (user is not null)
+    {
+        await next();
+        return;
+    }
+
+    var token = await httpContext.GetTokenAsync("access_token");
+
+    if (string.IsNullOrEmpty(token))
+    {
+        await next();
+        return;
+    }
+
+    var outh0UserProfileApi = httpContext.RequestServices.GetRequiredService<IOuth0UserProfileApi>();
+    var userProfile = await outh0UserProfileApi.GetUserProfileAsync(token);
+
+    var newUser = new User(Guid.NewGuid(), userProfile.Name);
+    var addUserWithSubjectSubject = httpContext.RequestServices.GetRequiredService<AddUserWithSubjectSubject>();
+    await addUserWithSubjectSubject.AddUserAsync(newUser, subject);
+
+    await next();
+}
+
+app.MapGet("/user", async ([FromServices] UserContext userContext) =>
+{
+    var user = await userContext.GetUserAsync();
+    return user;
 })
-.WithName("GetWeatherForecast")
+.WithName("GetUser")
 .RequireAuthorization();
 
 app.Run();
-
-record WeatherForecast(DateTime Date, int TemperatureC, string? Summary)
-{
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
-}
