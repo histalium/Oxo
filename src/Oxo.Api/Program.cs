@@ -49,6 +49,7 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<IUserDataAccess, UserDataAccess>();
 builder.Services.AddScoped<IFriendInviteDataAccess, FriendInviteDataAccess>();
 builder.Services.AddScoped<GetUserForSubject>();
+builder.Services.AddScoped<GetFriendInvites>();
 builder.Services.AddScoped<AddUserWithSubjectSubject>();
 builder.Services.AddScoped<AddFriendInvite>();
 builder.Services.AddScoped<IOuth0UserProfileApi, Outh0UserProfileApi>();
@@ -138,6 +139,22 @@ app.MapPost("/addfriendinvite", async ([FromBody] AddFriendInviteBody addFriendI
 
     return Results.Accepted();
 })
+.RequireAuthorization();
+
+app.MapGet("/friendinvites", async ([FromServices] GetFriendInvites getFriendInvites, [FromServices] UserContext userContext) =>
+{
+    var user = await userContext.GetUserAsync();
+
+    if (user is null)
+    {
+        return Results.Problem();
+    }
+
+    var invites = await getFriendInvites.GetInvitesAsync(user.Id);
+
+    return Results.Ok(invites);
+})
+.WithName("GetFriendInvites")
 .RequireAuthorization();
 
 app.Run();
