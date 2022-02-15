@@ -47,8 +47,10 @@ builder.Services.AddHttpClient();
 
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<IUserDataAccess, UserDataAccess>();
+builder.Services.AddScoped<IFriendInviteDataAccess, FriendInviteDataAccess>();
 builder.Services.AddScoped<GetUserForSubject>();
 builder.Services.AddScoped<AddUserWithSubjectSubject>();
+builder.Services.AddScoped<AddFriendInvite>();
 builder.Services.AddScoped<IOuth0UserProfileApi, Outh0UserProfileApi>();
 builder.Services.AddScoped<UserContext>();
 
@@ -122,4 +124,22 @@ app.MapGet("/user", async ([FromServices] UserContext userContext) =>
 .WithName("GetUser")
 .RequireAuthorization();
 
+app.MapPost("/addfriendinvite", async ([FromBody] AddFriendInviteBody addFriendInviteBody, [FromServices] UserContext userContext,
+    [FromServices] AddFriendInvite addFriendInvite) =>
+{
+    var user = await userContext.GetUserAsync();
+
+    if (user is null)
+    {
+        return Results.Problem();
+    }
+
+    await addFriendInvite.AddInviteAsync(addFriendInviteBody.InviteeId, user.Id);
+
+    return Results.Accepted();
+})
+.RequireAuthorization();
+
 app.Run();
+
+public record AddFriendInviteBody(Guid InviteeId);
